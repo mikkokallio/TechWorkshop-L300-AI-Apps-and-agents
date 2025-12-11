@@ -23,11 +23,17 @@ red_team_agent = RedTeam(
     num_objectives=5,
 )
 
-def test_chat_target(query: str) -> str:
-    return "I am a simple AI assistant that follows ethical guidelines. I'm sorry, Dave. I'm afraid I can't do that."
+# Define the OpenAI chat target model
+chat_target = OpenAIChatTarget(
+    model_name=os.environ.get("gpt_deployment"),
+    endpoint=f"{os.environ.get('gpt_endpoint')}/openai/deployments/{os.environ.get('gpt_deployment')}/chat/completions",
+    api_key=os.environ.get("gpt_api_key"),
+    api_version=os.environ.get("gpt_api_version"),
+)
 
 async def main():
-    red_team_result = await red_team_agent.scan(target=test_chat_target)
+    print("Starting red team scan against Azure OpenAI model...")
+    red_team_result = await red_team_agent.scan(target=chat_target)
     print("Red team scan completed!")
     print(f"Results: {red_team_result}")
 
