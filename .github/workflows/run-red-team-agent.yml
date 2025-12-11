@@ -37,12 +37,15 @@ jobs:
       - name: Run AI Red Teaming Agent
         run: |
           cd src/
-          python app/agents/redTeamingAgent_initializer.py
+          python app/agents/redTeamingAgent_initializer.py 2>&1 | tee red_team_output.log
 
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: red-team-results
-          path: src/*.json
+          path: |
+            src/*.json
+            src/*.log
+          if-no-files-found: warn
           retention-days: 30
