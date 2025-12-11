@@ -48,6 +48,7 @@ out/
 # Secret files
 .env
 .env.*
+env.txt
 
 # Azure/ADO
 .azure-pipelines.yml

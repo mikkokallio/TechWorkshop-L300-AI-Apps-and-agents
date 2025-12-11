@@ -11,18 +11,20 @@ import orjson  # Faster JSON library
 from dotenv import load_dotenv
 from opentelemetry import trace
 import logging
-# from opentelemetry.instrumentation.openai_v2 import OpenAIInstrumentor
+from opentelemetry.instrumentation.openai_v2 import OpenAIInstrumentor
 
 # Azure & OpenAI Imports
 from azure.ai.projects import AIProjectClient
 from azure.identity import DefaultAzureCredential
 from openai import AzureOpenAI
-# from azure.monitor.opentelemetry import configure_azure_monitor
-# from azure.ai.agents.telemetry import trace_function
+from azure.monitor.opentelemetry import configure_azure_monitor
+from azure.ai.agents.telemetry import trace_function
 
 # FastAPI Imports
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException, status
 from fastapi.responses import HTMLResponse
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
+import secrets
 
 # Custom Utilities
 from utils.history_utils import (
@@ -42,16 +44,34 @@ from utils.message_utils import (
 # Agent Imports
 from app.tools.understandImage import get_image_description
 from services.agent_service import get_or_create_agent_processor
-# from app.tools.singleAgentExample import generate_response
-# from app.tools.aiSearchTools import product_recommendations
-# from app.tools.imageCreationTool import create_image
-# from app.servers.mcp_inventory_server import mcp as inventory_mcp
-# from services.handoff_service import HandoffService
+#from app.tools.singleAgentExample import generate_response
+from app.tools.aiSearchTools import product_recommendations
+from app.tools.imageCreationTool import create_image
+from app.servers.mcp_inventory_server import mcp as inventory_mcp
+from services.handoff_service import HandoffService
 
 
 load_dotenv()
 env_vars = load_env_vars()
 validated_env_vars = validate_env_vars(env_vars)
+
+# Configure Basic Auth
+security = HTTPBasic()
+WORKSHOP_USERNAME = os.getenv("WORKSHOP_USERNAME", "workshop")
+WORKSHOP_PASSWORD = os.getenv("WORKSHOP_PASSWORD", "TechWorkshop2025!")
+
+def verify_credentials(credentials: HTTPBasicCredentials = Depends(security)):
+    """Verify username and password for basic auth."""
+    is_username_correct = secrets.compare_digest(credentials.username.encode("utf8"), WORKSHOP_USERNAME.encode("utf8"))
+    is_password_correct = secrets.compare_digest(credentials.password.encode("utf8"), WORKSHOP_PASSWORD.encode("utf8"))
+    
+    if not (is_username_correct and is_password_correct):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    return credentials.username
 
 # Configure structured logging
 logging.basicConfig(
@@ -63,9 +83,9 @@ logger = logging.getLogger(__name__)
 # Global thread pool executor for CPU-bound operations
 thread_pool = ThreadPoolExecutor(max_workers=4)
 
-# application_insights_connection_string = os.environ["APPLICATIONINSIGHTS_CONNECTION_STRING"]
-# configure_azure_monitor(connection_string=application_insights_connection_string)
-# OpenAIInstrumentor().instrument()
+application_insights_connection_string = os.environ["APPLICATIONINSIGHTS_CONNECTION_STRING"]
+configure_azure_monitor(connection_string=application_insights_connection_string)
+OpenAIInstrumentor().instrument()
 
 scenario = os.path.basename(__file__)
 tracer = trace.get_tracer(__name__)
@@ -124,21 +144,21 @@ project_client = AIProjectClient(
     credential=DefaultAzureCredential(),
 )
 
-# llm_client = AzureOpenAI(
-#     azure_endpoint=validated_env_vars['AZURE_OPENAI_ENDPOINT'],
-#     api_key=validated_env_vars['AZURE_OPENAI_KEY'],
-#     api_version=validated_env_vars['AZURE_OPENAI_API_VERSION'],
-# )
+llm_client = AzureOpenAI(
+    azure_endpoint=validated_env_vars['AZURE_OPENAI_ENDPOINT'],
+    api_key=validated_env_vars['AZURE_OPENAI_KEY'],
+    api_version=validated_env_vars['AZURE_OPENAI_API_VERSION'],
+)
 
-# handoff_service = HandoffService(
-#     azure_openai_client=llm_client,
-#     deployment_name=validated_env_vars['gpt_deployment'],
-#     default_domain="cora",
-#     lazy_classification=True
-# )
+handoff_service = HandoffService(
+    azure_openai_client=llm_client,
+    deployment_name=validated_env_vars['gpt_deployment'],
+    default_domain="cora",
+    lazy_classification=True
+)
 
 @app.get("/")
-async def get():
+async def get(username: str = Depends(verify_credentials)):
     chat_html_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'chat.html')
     with open(chat_html_path, "r", encoding="utf-8") as f:
         return HTMLResponse(f.read())
@@ -245,65 +265,65 @@ async def websocket_endpoint(websocket: WebSocket):
             
             chat_history = parse_conversation_history(conversation_history, chat_history, user_message)
             
-            await websocket.send_text(fast_json_dumps({"answer": "This application is not yet ready to serve results. Please check back later.", "agent": None, "cart": persistent_cart}))
+            #await websocket.send_text(fast_json_dumps({"answer": "This application is not yet ready to serve results. Please check back later.", "agent": None, "cart": persistent_cart}))
 
             # # Single-agent example
-            # try:
-            #     response = generate_response(user_message)
-            #     await websocket.send_text(fast_json_dumps({"answer": response, "agent": "single", "cart": persistent_cart}))
-            # except Exception as e:
-            #     logger.error("Error during single-agent response generation", exc_info=True)
-            #     await websocket.send_text(fast_json_dumps({"answer": "Error during single-agent response generation", "error": str(e), "cart": persistent_cart}))
+            #try:
+            #    response = generate_response(user_message)
+            #    await websocket.send_text(fast_json_dumps({"answer": response, "agent": "single", "cart": persistent_cart}))
+            #except Exception as e:
+            #    logger.error("Error during single-agent response generation", exc_info=True)
+            #    await websocket.send_text(fast_json_dumps({"answer": "Error during single-agent response generation", "error": str(e), "cart": persistent_cart}))
 
-            # # Multi-agent example with MCP inventory server and handoff service
-            # # Run customer loyalty task only once when session starts
-            # customer_id = "CUST001"
-            # if not customer_loyalty_executed:
-            #     asyncio.create_task(run_customer_loyalty_task(customer_id))
-            #     customer_loyalty_executed = True
-            # # Run handoff service
-            # try:
-            #     print("Entering handoff service.")
-            #     handoff_start_time = time.time()
-            #     formatted_history = format_chat_history(redact_bad_prompts_in_history(chat_history, bad_prompts))
-            #     logger.info("Handoff agent execution initiated - commencing agent selection protocol")
-            #     with tracer.start_as_current_span("Handoff Intent Classification"):
-            #         # Intent classification using structured outputs for reliable routing
-            #         intent_result = handoff_service.classify_intent(
-            #             user_message=user_message,
-            #             session_id=session_id,
-            #             chat_history=formatted_history
-            #         )
+            # Multi-agent example with MCP inventory server and handoff service
+            # Run customer loyalty task only once when session starts
+            customer_id = "CUST001"
+            if not customer_loyalty_executed:
+                asyncio.create_task(run_customer_loyalty_task(customer_id))
+                customer_loyalty_executed = True
+            # Run handoff service
+            try:
+                print("Entering handoff service.")
+                handoff_start_time = time.time()
+                formatted_history = format_chat_history(redact_bad_prompts_in_history(chat_history, bad_prompts))
+                logger.info("Handoff agent execution initiated - commencing agent selection protocol")
+                with tracer.start_as_current_span("Handoff Intent Classification"):
+                    # Intent classification using structured outputs for reliable routing
+                    intent_result = handoff_service.classify_intent(
+                        user_message=user_message,
+                        session_id=session_id,
+                        chat_history=formatted_history
+                    )
 
-            #     # Extract agent information from classification result
-            #     agent_name = intent_result["agent_id"]  # e.g., "cora", "cart_manager"
-            #     agent_selected = validated_env_vars.get(agent_name)  # Get agent ID from environment
+                # Extract agent information from classification result
+                agent_name = intent_result["agent_id"]  # e.g., "cora", "cart_manager"
+                agent_selected = validated_env_vars.get(agent_name)  # Get agent ID from environment
 
-            #     logger.info(f"Intent classification: domain={intent_result['domain']}, "
-            #                f"confidence={intent_result['confidence']:.2f}, "
-            #                f"reasoning={intent_result['reasoning']}")
-            #     print(f"Intent classification: domain={intent_result['domain']}, "
-            #                f"confidence={intent_result['confidence']:.2f}, "
-            #                f"reasoning={intent_result['reasoning']}")
-            #     log_timing("Handoff Processing", handoff_start_time, 
-            #               f"Selected: {agent_name} (confidence: {intent_result['confidence']:.2f})")
+                logger.info(f"Intent classification: domain={intent_result['domain']}, "
+                           f"confidence={intent_result['confidence']:.2f}, "
+                           f"reasoning={intent_result['reasoning']}")
+                print(f"Intent classification: domain={intent_result['domain']}, "
+                           f"confidence={intent_result['confidence']:.2f}, "
+                           f"reasoning={intent_result['reasoning']}")
+                log_timing("Handoff Processing", handoff_start_time, 
+                          f"Selected: {agent_name} (confidence: {intent_result['confidence']:.2f})")
                 
-            #     # Check if agent selection failed
-            #     if not agent_selected or not agent_name:
-            #         await websocket.send_text(fast_json_dumps({
-            #             "answer": "Sorry, I could not determine the right agent.",
-            #             "agent": None,
-            #             "cart": persistent_cart
-            #         }))
-            #         continue
-            # except Exception as e:
-            #     logger.error("Error during handoff classification", exc_info=True)
-            #     await websocket.send_text(fast_json_dumps({
-            #         "answer": "Error during handoff classification",
-            #         "error": str(e),
-            #         "cart": persistent_cart
-            #     }))
-            #     continue
+                # Check if agent selection failed
+                if not agent_selected or not agent_name:
+                    await websocket.send_text(fast_json_dumps({
+                        "answer": "Sorry, I could not determine the right agent.",
+                        "agent": None,
+                        "cart": persistent_cart
+                    }))
+                    continue
+            except Exception as e:
+                logger.error("Error during handoff classification", exc_info=True)
+                await websocket.send_text(fast_json_dumps({
+                    "answer": "Error during handoff classification",
+                    "error": str(e),
+                    "cart": persistent_cart
+                }))
+                continue
             
             # # =============================================================================
             # # UNIFIED AGENT EXECUTION: Context Enrichment & Agent Processing
@@ -314,14 +334,14 @@ async def websocket_endpoint(websocket: WebSocket):
             # # 3. Agent Execution: Use AgentProcessor for streaming responses
             # # 4. Response Handling: Parse output, update state, send to user
             # # =============================================================================
-            # try:
-            #     agent_execution_start_time = time.time()
-            #     logger.info(f"{agent_name} agent execution initiated")
+            try:
+                agent_execution_start_time = time.time()
+                logger.info(f"{agent_name} agent execution initiated")
                 
-            #     # Initialize context enrichment variables
-            #     enriched_message = user_message  # Base message
-            #     image_data = None                # Image description from vision analysis
-            #     products = None                  # Product recommendations from AI Search
+                # Initialize context enrichment variables
+                enriched_message = user_message  # Base message
+                image_data = None                # Image description from vision analysis
+                products = None                  # Product recommendations from AI Search
                 
             #     # =============================================================================
             #     # MULTIMODAL CONTENT PROCESSING: Enrich context with visual data
@@ -331,23 +351,23 @@ async def websocket_endpoint(websocket: WebSocket):
             #     # =============================================================================
                 
             #     # Process multimodal inputs if present
-            #     if image_url:
-            #         # IMAGE ANALYSIS: Extract visual information from uploaded images
-            #         # Uses phi-4 vision model with caching to avoid re-analyzing same image
-            #         # Results are cached for the session and shared across agents
-            #         image_start_time = time.time()
-            #         log_cache_status(image_cache, image_url)
-            #         image_data = await get_cached_image_description(image_url, image_cache)
-            #         log_timing("Image Analysis", image_start_time, f"URL: {image_url[:50]}...")
+                if image_url:
+                    # IMAGE ANALYSIS: Extract visual information from uploaded images
+                    # Uses phi-4 vision model with caching to avoid re-analyzing same image
+                    # Results are cached for the session and shared across agents
+                    image_start_time = time.time()
+                    log_cache_status(image_cache, image_url)
+                    image_data = await get_cached_image_description(image_url, image_cache)
+                    log_timing("Image Analysis", image_start_time, f"URL: {image_url[:50]}...")
                     
-            #         # Send analysis message to user (provides feedback during processing)
-            #         analysis_msg = get_rotating_message(IMAGE_ANALYSIS_MESSAGES)
-            #         await websocket.send_text(fast_json_dumps({
-            #             "answer": analysis_msg,
-            #             "agent": agent_name,
-            #             "cart": persistent_cart
-            #         }))
-            #         logger.info("Image analysis completed")
+                    # Send analysis message to user (provides feedback during processing)
+                    analysis_msg = get_rotating_message(IMAGE_ANALYSIS_MESSAGES)
+                    await websocket.send_text(fast_json_dumps({
+                        "answer": analysis_msg,
+                        "agent": agent_name,
+                        "cart": persistent_cart
+                    }))
+                    logger.info("Image analysis completed")
                 
             #     # =============================================================================
             #     # PRODUCT RECOMMENDATIONS: AI Search integration for contextual products
@@ -358,17 +378,17 @@ async def websocket_endpoint(websocket: WebSocket):
             #     # =============================================================================
                 
             #     # Get product recommendations for relevant agents
-            #     if agent_name in ["interior_designer", "interior_designer_create_image", "cora"]:
-            #         product_start_time = time.time()
-            #         # Build search query from all available context
-            #         search_query = user_message
-            #         if image_data:
-            #             # Add visual context to search (e.g., "blue living room" → search for blue paint)
-            #             search_query += f" {image_data} paint accessories, paint sprayers, drop cloths, painters tape"
+                if agent_name in ["interior_designer", "interior_designer_create_image", "cora"]:
+                    product_start_time = time.time()
+                    # Build search query from all available context
+                    search_query = user_message
+                    if image_data:
+                        # Add visual context to search (e.g., "blue living room" → search for blue paint)
+                        search_query += f" {image_data} paint accessories, paint sprayers, drop cloths, painters tape"
                     
-            #         products = product_recommendations(search_query)
-            #         log_timing("Product Recommendations", product_start_time, f"Found: {len(products) if products else 0}")
-            #         logger.info("Product recommendations completed")
+                    products = product_recommendations(search_query)
+                    log_timing("Product Recommendations", product_start_time, f"Found: {len(products) if products else 0}")
+                    logger.info("Product recommendations completed")
                 
             #     # =============================================================================
             #     # CONTEXT ENRICHMENT: Build complete message with all available context
@@ -379,15 +399,15 @@ async def websocket_endpoint(websocket: WebSocket):
             #     # =============================================================================
                 
             #     # Build enriched message with all context
-            #     if image_data or products:
-            #         context_parts = []
-            #         if image_data:
-            #             context_parts.append(f"Image description: {image_data}")
-            #         if products:
-            #             context_parts.append(f"Available products: {fast_json_dumps(products)}")
-                    
+                if image_data or products:
+                    context_parts = []
+                    if image_data:
+                        context_parts.append(f"Image description: {image_data}")
+                    if products:
+                        context_parts.append(f"Available products: {fast_json_dumps(products)}")
+                   
             #         # Prepend user message, append all enriched context
-            #         enriched_message = f"{user_message}\n\n" + "\n".join(context_parts)
+                    enriched_message = f"{user_message}\n\n" + "\n".join(context_parts)
                 
             #     # =============================================================================
             #     # AGENT EXECUTION: Unified pattern for all agents (no if-else branching!)
@@ -402,52 +422,52 @@ async def websocket_endpoint(websocket: WebSocket):
             #     # =============================================================================
                 
             #     # Execute agent based on type - unified agent processor pattern
-            #     bot_reply = ""
+                bot_reply = ""
                 
-            #     with tracer.start_as_current_span(f"{agent_name.title()} Agent Call"):
+                with tracer.start_as_current_span(f"{agent_name.title()} Agent Call"):
             #         # =================================================================
             #         # SPECIAL CASE: Image Creation (uses gpt-image-1, not agent processor)
             #         # =================================================================
             #         # This is the only case that doesn't use the unified agent pattern
             #         # because it generates images via gpt-image-1 API rather than conversing
-            #         if agent_name == "interior_designer_create_image":
-            #             # Acknowledge image creation request
-            #             thank_you_msg = get_rotating_message(IMAGE_CREATE_MESSAGES)
-            #             await websocket.send_text(fast_json_dumps({
-            #                 "answer": thank_you_msg,
-            #                 "agent": "interior_designer",
-            #                 "cart": persistent_cart
-            #             }))
+                    if agent_name == "interior_designer_create_image":
+                        # Acknowledge image creation request
+                        thank_you_msg = get_rotating_message(IMAGE_CREATE_MESSAGES)
+                        await websocket.send_text(fast_json_dumps({
+                            "answer": thank_you_msg,
+                            "agent": "interior_designer",
+                            "cart": persistent_cart
+                        }))
                         
             #             # Use persistent image URL for context (e.g., "make this room blue")
-            #             if persistent_image_url:
-            #                 image_data = await get_cached_image_description(persistent_image_url, image_cache)
-            #                 enriched_message = f"{user_message} {image_data}"
+                        if persistent_image_url:
+                            image_data = await get_cached_image_description(persistent_image_url, image_cache)
+                            enriched_message = f"{user_message} {image_data}"
                         
             #             # Create image using gpt-image-1
-            #             image = create_image(text=enriched_message, image_url=persistent_image_url)
+                        image = create_image(text=enriched_message, image_url=persistent_image_url)
                         
             #             # Build response with generated image URL
-            #             response_data = {
-            #                 "answer": "Here is the requested image",
-            #                 "products": "",
-            #                 "discount_percentage": session_discount_percentage or "",
-            #                 "image_url": image,
-            #                 "additional_data": "",
-            #                 "cart": persistent_cart
-            #             }
+                        response_data = {
+                            "answer": "Here is the requested image",
+                            "products": "",
+                            "discount_percentage": session_discount_percentage or "",
+                            "image_url": image,
+                            "additional_data": "",
+                            "cart": persistent_cart
+                        }
                         
             #             # Send response
-            #             response_json = fast_json_dumps(response_data)
-            #             raw_io_history.append({"output": response_json, "cart": persistent_cart})
+                        response_json = fast_json_dumps(response_data)
+                        raw_io_history.append({"output": response_json, "cart": persistent_cart})
                         
-            #             bot_answer = response_data.get("answer", "")
-            #             product_names = extract_product_names_from_response(response_data)
-            #             chat_history.append(("bot", bot_answer + product_names))
+                        bot_answer = response_data.get("answer", "")
+                        product_names = extract_product_names_from_response(response_data)
+                        chat_history.append(("bot", bot_answer + product_names))
                         
-            #             await websocket.send_text(response_json)
-            #             log_timing("Agent Execution", agent_execution_start_time, f"Agent: {agent_name}")
-            #             continue  # Skip common response handling
+                        await websocket.send_text(response_json)
+                        log_timing("Agent Execution", agent_execution_start_time, f"Agent: {agent_name}")
+                        continue  # Skip common response handling
                     
             #         # =================================================================
             #         # AGENT-SPECIFIC CONTEXT PREPARATION
@@ -459,19 +479,19 @@ async def websocket_endpoint(websocket: WebSocket):
             #         # =================================================================
                     
             #         # Prepare context based on agent type
-            #         agent_context = enriched_message  # Default: enriched message
+                    agent_context = enriched_message  # Default: enriched message
                     
             #         # Cart manager needs full raw_io_history for state management
-            #         if agent_name == "cart_manager":
-            #             # Provide complete interaction history so cart_manager can track
-            #             # all add/remove operations and maintain accurate cart state
-            #             agent_context = f"{enriched_message}\n\nRAW_IO_HISTORY:\n{fast_json_dumps(list(raw_io_history), option=orjson.OPT_INDENT_2)}"
+                    if agent_name == "cart_manager":
+                        # Provide complete interaction history so cart_manager can track
+                        # all add/remove operations and maintain accurate cart state
+                        agent_context = f"{enriched_message}\n\nRAW_IO_HISTORY:\n{fast_json_dumps(list(raw_io_history), option=orjson.OPT_INDENT_2)}"
                     
             #         # Cora needs conversation history for contextual dialogue
-            #         elif agent_name == "cora":
-            #             # Provide formatted chat history so cora can reference previous
-            #             # conversation turns and maintain coherent multi-turn dialogue
-            #             agent_context = f"{formatted_history}\n\nUser: {enriched_message}"
+                    elif agent_name == "cora":
+                        # Provide formatted chat history so cora can reference previous
+                        # conversation turns and maintain coherent multi-turn dialogue
+                        agent_context = f"{formatted_history}\n\nUser: {enriched_message}"
                     
             #         # =================================================================
             #         # UNIFIED AGENT PROCESSOR EXECUTION (All agents use this pattern!)
@@ -484,20 +504,20 @@ async def websocket_endpoint(websocket: WebSocket):
             #         # =================================================================
                     
             #         # All agents use unified agent processor pattern
-            #         processor = get_or_create_agent_processor(
-            #             agent_id=agent_selected,     # Agent ID from environment variables
-            #             agent_type=agent_name,       # Agent type (cora, cart_manager, etc.)
-            #             thread_id=thread.id,         # Conversation thread for stateful agents
-            #             project_client=project_client  # Azure AI client for agent execution
-            #         )
+                    processor = get_or_create_agent_processor(
+                        agent_id=agent_selected,     # Agent ID from environment variables
+                        agent_type=agent_name,       # Agent type (cora, cart_manager, etc.)
+                        thread_id=thread.id,         # Conversation thread for stateful agents
+                        project_client=project_client  # Azure AI client for agent execution
+                    )
                     
             #         # Stream response from agent (yields chunks as they're generated)
-            #         async for msg in processor.run_conversation_with_text_stream(input_message=agent_context):
-            #             bot_reply = extract_bot_reply(msg)  # Extract text from streaming message
+                    async for msg in processor.run_conversation_with_text_stream(input_message=agent_context):
+                        bot_reply = extract_bot_reply(msg)  # Extract text from streaming message
                 
-            #     logger.info(f"{agent_name} agent execution completed")
+                logger.info(f"{agent_name} agent execution completed")
                 
-            #     log_timing("Agent Execution", agent_execution_start_time, f"Agent: {agent_name}")
+                log_timing("Agent Execution", agent_execution_start_time, f"Agent: {agent_name}")
                 
             #     # =============================================================================
             #     # RESPONSE PROCESSING: Parse structured output and update session state
@@ -508,8 +528,8 @@ async def websocket_endpoint(websocket: WebSocket):
             #     # =============================================================================
                 
             #     # Parse the response first to get structured fields (answer, products, etc.)
-            #     parsed_response = parse_agent_response(bot_reply)
-            #     parsed_response["agent"] = agent_name  # Override agent field to show which agent responded
+                parsed_response = parse_agent_response(bot_reply)
+                parsed_response["agent"] = agent_name  # Override agent field to show which agent responded
                 
             #     # =============================================================================
             #     # CART STATE UPDATE: Persist cart changes from cart_manager agent
@@ -519,10 +539,10 @@ async def websocket_endpoint(websocket: WebSocket):
             #     # =============================================================================
                 
             #     # Update persistent_cart if cart_manager returned a cart
-            #     if agent_name == "cart_manager" and "cart" in parsed_response:
-            #         if isinstance(parsed_response.get("cart"), list):
-            #             persistent_cart = parsed_response["cart"]
-            #             logger.info(f"Cart updated by cart_manager: {len(persistent_cart)} items")
+                if agent_name == "cart_manager" and "cart" in parsed_response:
+                    if isinstance(parsed_response.get("cart"), list):
+                        persistent_cart = parsed_response["cart"]
+                        logger.info(f"Cart updated by cart_manager: {len(persistent_cart)} items")
                 
             #     # =============================================================================
             #     # CONVERSATION HISTORY UPDATE: Maintain chat context for multi-turn dialogue
@@ -532,14 +552,14 @@ async def websocket_endpoint(websocket: WebSocket):
             #     # =============================================================================
                 
             #     # Add the bot reply to chat history with products if available
-            #     bot_answer = parsed_response.get("answer", bot_reply or "")
-            #     product_names = extract_product_names_from_response(parsed_response)
-            #     chat_history.append(("bot", bot_answer + product_names))
-            #     print(f"Chat history after bot reply: {chat_history}")
+                bot_answer = parsed_response.get("answer", bot_reply or "")
+                product_names = extract_product_names_from_response(parsed_response)
+                chat_history.append(("bot", bot_answer + product_names))
+                print(f"Chat history after bot reply: {chat_history}")
                 
             #     # Clean the conversation history to remove large product data (keep compact)
-            #     chat_history = clean_conversation_history(chat_history)
-            #     print(f"Chat history after bot reply: {chat_history}")
+                chat_history = clean_conversation_history(chat_history)
+                print(f"Chat history after bot reply: {chat_history}")
                 
             #     # =============================================================================
             #     # DISCOUNT PERSISTENCE: Maintain customer loyalty tier across session
@@ -549,12 +569,12 @@ async def websocket_endpoint(websocket: WebSocket):
             #     # =============================================================================
                 
             #     # Update session discount_percentage if a new one is received
-            #     if parsed_response.get("discount_percentage"):
-            #         session_discount_percentage = parsed_response["discount_percentage"]
+                if parsed_response.get("discount_percentage"):
+                    session_discount_percentage = parsed_response["discount_percentage"]
                 
             #     # Include session discount_percentage in all responses if available
-            #     if session_discount_percentage and not parsed_response.get("discount_percentage"):
-            #         parsed_response["discount_percentage"] = session_discount_percentage
+                if session_discount_percentage and not parsed_response.get("discount_percentage"):
+                    parsed_response["discount_percentage"] = session_discount_percentage
                 
             #     # =============================================================================
             #     # RESPONSE TRANSMISSION: Send structured response to user
@@ -564,9 +584,9 @@ async def websocket_endpoint(websocket: WebSocket):
             #     # =============================================================================
                 
             #     # When sending any other response, also append to raw_io_history
-            #     response_json = fast_json_dumps({**parsed_response, "cart": persistent_cart})
-            #     raw_io_history.append({"output": response_json, "cart": persistent_cart})
-            #     await websocket.send_text(response_json)
+                response_json = fast_json_dumps({**parsed_response, "cart": persistent_cart})
+                raw_io_history.append({"output": response_json, "cart": persistent_cart})
+                await websocket.send_text(response_json)
                 
             #     # =============================================================================
             #     # DELAYED LOYALTY RESPONSE: Send loyalty message after cart operations
@@ -577,10 +597,10 @@ async def websocket_endpoint(websocket: WebSocket):
             #     # =============================================================================
                 
             #     # After cart_manager response, send loyalty response if available (only once per session)
-            #     if agent_name == "cart_manager" and session_loyalty_response and not loyalty_response_sent:
-            #         loyalty_response_with_cart = {**session_loyalty_response, "cart": persistent_cart}
-            #         await websocket.send_text(fast_json_dumps(loyalty_response_with_cart))
-            #         loyalty_response_sent = True
+                if agent_name == "cart_manager" and session_loyalty_response and not loyalty_response_sent:
+                    loyalty_response_with_cart = {**session_loyalty_response, "cart": persistent_cart}
+                    await websocket.send_text(fast_json_dumps(loyalty_response_with_cart))
+                    loyalty_response_sent = True
                     
             # # =============================================================================
             # # ERROR HANDLING: Failure during agent execution
@@ -588,16 +608,16 @@ async def websocket_endpoint(websocket: WebSocket):
             # # If agent execution fails, catch the exception, log it for debugging,
             # # and send a user-friendly error message with the current cart state.
             # # =============================================================================
-            # except Exception as e:
-            #     logger.error("Error in agent execution", exc_info=True)
-            #     try:
-            #         await websocket.send_text(fast_json_dumps({
-            #             "answer": "Internal server error",
-            #             "error": str(e),
-            #             "cart": persistent_cart
-            #         }))
-            #     except Exception:
-            #         pass  # If even error sending fails, silently continue
+            except Exception as e:
+                logger.error("Error in agent execution", exc_info=True)
+                try:
+                    await websocket.send_text(fast_json_dumps({
+                        "answer": "Internal server error",
+                        "error": str(e),
+                        "cart": persistent_cart
+                    }))
+                except Exception:
+                    pass  # If even error sending fails, silently continue
     
     # =============================================================================
     # SESSION-LEVEL ERROR HANDLING: Catch WebSocket disconnects and errors

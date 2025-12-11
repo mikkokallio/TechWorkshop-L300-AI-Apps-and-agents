@@ -83,7 +83,7 @@ resource aiFoundry 'Microsoft.CognitiveServices/accounts@2025-04-01-preview' = {
     // Defines developer API endpoint subdomain
     customSubDomainName: aiFoundryName
 
-    disableLocalAuth: false
+    disableLocalAuth: false  // API key authentication enabled
   }
 }
 
