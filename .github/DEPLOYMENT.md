@@ -14,15 +14,20 @@ Go to: **Settings** → **Secrets and variables** → **Actions** → **New repo
    - **Value**: Copy the entire contents of your local `src/.env` file
    - **Usage**: Creates the `.env` file inside the Docker container during build
 
-2. **`ACR_USERNAME`**
-   - **Description**: Azure Container Registry username
-   - **Value**: Your ACR registry name (typically the same as the registry name, e.g., `scsyfyid2bvkqcosureg`)
-   - **How to get**: Run `az acr credential show --name scsyfyid2bvkqcosureg --query username -o tsv`
+2. **`AZURE_CONTAINER_REGISTRY`**
+   - **Description**: Azure Container Registry server name
+   - **Value**: `scsyfyid2bvkqcosureg.azurecr.io`
+   - **Usage**: The full registry URL for logging in and pushing images
 
-3. **`ACR_PASSWORD`**
+3. **`AZURE_CONTAINER_REGISTRY_USERNAME`**
+   - **Description**: Azure Container Registry username
+   - **Value**: Your ACR registry name (e.g., `scsyfyid2bvkqcosureg`)
+   - **How to get**: Run `az acr credential show --name <your-acr-name> --query username -o tsv`
+
+4. **`AZURE_CONTAINER_REGISTRY_PASSWORD`**
    - **Description**: Azure Container Registry password
-   - **Value**: Your ACR admin password
-   - **How to get**: Run `az acr credential show --name scsyfyid2bvkqcosureg --query passwords[0].value -o tsv`
+   - **Value**: Your ACR admin password (retrieve using the command below)
+   - **How to get**: Run `az acr credential show --name <your-acr-name> --query passwords[0].value -o tsv`
 
 ## Workflow Triggers
 
