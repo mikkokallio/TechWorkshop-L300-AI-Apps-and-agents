@@ -55,6 +55,5 @@ env.txt
 *.azuredevops
 
 # Github
-.github/
 parameters.json
 .azure
